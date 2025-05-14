@@ -8,4 +8,5 @@ env.bak/
 venv.bak/
 
 credentials/
-token.jsoncredentials/
+token.json
+credentials/
