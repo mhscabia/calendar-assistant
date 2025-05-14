@@ -3,11 +3,14 @@ import os
 import pytz
 import logging
 
+
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+
+from services.twilio import TwilioService
 
 # Configurações
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -67,6 +70,8 @@ def main():
     start_of_day = now.replace(hour=0, minute=0, second=0).isoformat()
     end_of_day = now.replace(hour=23, minute=59, second=59).isoformat()
 
+    twilio_service = TwilioService()
+
     try:
         all_calendars = service.calendarList().list().execute().get("items", [])
         filtered_calendars = [
@@ -81,9 +86,16 @@ def main():
             else:
                 all_events.extend(events)
 
-        for event in all_events:
-            start = event["start"].get("dateTime", event["start"].get("date"))
-            logging.info(f"{start} - {event['summary']}")
+        if all_events:
+            message_body = "🗓️ Seus eventos de hoje:\n\n"
+            for event in all_events:
+                start = event["start"].get("dateTime", event["start"].get("date"))
+                message_body += f"• {start} - {event['summary']}\n"
+        else:
+            message_body = "Você não tem eventos agendados para hoje! ✅"
+
+        # Envia a mensagem para o WhatsApp
+        twilio_service.send_message(message_body)
 
     except HttpError as error:
         logging.error(f"Ocorreu um erro: {error}")
