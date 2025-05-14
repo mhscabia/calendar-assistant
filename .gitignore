@@ -9,3 +9,4 @@ venv.bak/
 
 credentials/
 token.json
+__pycache__/
