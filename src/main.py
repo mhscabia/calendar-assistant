@@ -1,6 +1,7 @@
 import datetime
-import os.path
+import os
 import pytz
+import logging
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -8,73 +9,84 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-# If modifying these scopes, delete the file token.json.
+# Configurações
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CREDENTIALS_PATH = os.path.abspath("credentials/credentials.json")
-print(f"Caminho absoluto das credenciais: {CREDENTIALS_PATH}")
+TOKEN_PATH = os.path.join(BASE_DIR, "token.json")
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+NOT_WANTED_CALENDARS = ["Outros", "Feriados no Brasil", "Trabalho", "Faculdade"]
+
+# Configuração de logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-def main():
+def authenticate():
+    """Autentica o usuário e retorna as credenciais."""
     creds = None
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    if os.path.exists(TOKEN_PATH):
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CREDENTIALS_PATH, SCOPES
-            )
+            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
             creds = flow.run_local_server(port=0)
+        with open(TOKEN_PATH, "w") as token_file:
+            token_file.write(creds.to_json())
+    return creds
 
-        with open("token.json", "w") as token:
-            token.write(creds.to_json())
+
+def get_calendar_service(creds):
+    """Cria o serviço do Google Calendar."""
+    return build("calendar", "v3", credentials=creds)
+
+
+def get_events(service, calendar_id, start_of_day, end_of_day):
+    """Obtém eventos de um calendário específico."""
+    try:
+        events_result = service.events().list(
+            calendarId=calendar_id,
+            timeMin=start_of_day,
+            timeMax=end_of_day,
+            maxResults=10,
+            singleEvents=True,
+            orderBy="startTime",
+        ).execute()
+        return events_result.get("items", [])
+    except HttpError as error:
+        logging.error(f"Erro ao obter eventos do calendário {calendar_id}: {error}")
+        return []
+
+
+def main():
+    creds = authenticate()
+    service = get_calendar_service(creds)
+
+    tz = pytz.timezone("America/Sao_Paulo")
+    now = datetime.datetime.now(tz)
+    start_of_day = now.replace(hour=0, minute=0, second=0).isoformat()
+    end_of_day = now.replace(hour=23, minute=59, second=59).isoformat()
 
     try:
-        all_events = []
-        service = build("calendar", "v3", credentials=creds)
-        not_wanted_calendars = [
-            "Outros",
-            "Feriados no Brasil",
-            "Trabalho",
-            "Faculdade"
+        all_calendars = service.calendarList().list().execute().get("items", [])
+        filtered_calendars = [
+            calendar for calendar in all_calendars if calendar["summary"] not in NOT_WANTED_CALENDARS
         ]
 
-        tz = pytz.timezone("America/Sao_Paulo")
-        now = datetime.datetime.now(tz)
-        start_of_day = now.replace(hour=0, minute=0, second=0).isoformat()
-        end_of_day = now.replace(hour=23, minute=59, second=59).isoformat()
-        all_calendars_infos = service.calendarList().list().execute().get("items", [])
-        all_calendar_ids = [calendar for calendar in all_calendars_infos if calendar["summary"] not in not_wanted_calendars]
-        print("Getting the upcoming 10 events")
-        for calendar in all_calendar_ids:
-            events_result = (
-                service.events()
-                .list(
-                    calendarId=calendar["id"],
-                    timeMin=start_of_day,
-                    timeMax=end_of_day,
-                    maxResults=10,
-                    singleEvents=True,
-                    orderBy="startTime",
-                )
-                .execute()
-            )
-            events = events_result.get("items", [])
-
+        all_events = []
+        for calendar in filtered_calendars:
+            events = get_events(service, calendar["id"], start_of_day, end_of_day)
             if not events:
-                print(f"No upcoming events found in ID {calendar["summary"]}")
+                logging.info(f"Sem eventos no calendário: {calendar['summary']}")
             else:
-                for event in events:
-                    all_events.append(event)
+                all_events.extend(events)
 
         for event in all_events:
             start = event["start"].get("dateTime", event["start"].get("date"))
-            print(start, event["summary"])
+            logging.info(f"{start} - {event['summary']}")
 
     except HttpError as error:
-        print(f"An error occurred: {error}")
+        logging.error(f"Ocorreu um erro: {error}")
 
 
 if __name__ == "__main__":
