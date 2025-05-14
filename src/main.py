@@ -87,10 +87,12 @@ def main():
                 all_events.extend(events)
 
         if all_events:
+            all_events.sort(key=lambda x: x["start"].get("dateTime", x["start"].get("date")))
             message_body = "🗓️ Seus eventos de hoje:\n\n"
             for event in all_events:
                 start = event["start"].get("dateTime", event["start"].get("date"))
-                message_body += f"• {start} - {event['summary']}\n"
+                formatted_start = datetime.datetime.fromisoformat(start).astimezone(tz).strftime("%H:%M")
+                message_body += f"• {formatted_start} - {event['summary']}\n"
         else:
             message_body = "Você não tem eventos agendados para hoje! ✅"
 
